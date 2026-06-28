@@ -28,13 +28,17 @@ namespace AssetsTools.NET
         /// </summary>
         public Hash128 TypeHash { get; set; }
         /// <summary>
-        /// Nodes for this type. This list will be empty if the type is stripped.
+        /// Hash for external type tree types.
         /// </summary>
-        public List<TypeTreeNode> Nodes { get; set; }
+        public Hash128 ExtTypeHash { get; set; }
         /// <summary>
-        /// String table bytes for this type.
+        /// Is the type blob a definition (includes nodes)? If not, it is an external reference (includes no nodes).
         /// </summary>
-        public byte[] StringBufferBytes { get; set; }
+        public bool TypeBlobIsDefinition { get; set; }
+        /// <summary>
+        /// The type tree blob containing type nodes and the string buffer.
+        /// </summary>
+        public TypeTreeBlob TypeBlob { get; set; }
         /// <summary>
         /// Is the type a reference type?
         /// </summary>
@@ -49,10 +53,30 @@ namespace AssetsTools.NET
         /// </summary>
         public AssetTypeReference TypeReference { get; set; }
 
+        /// <summary>
+        /// Nodes for this type. This list will be empty if the type is stripped.
+        /// </summary>
+        public List<TypeTreeNode> Nodes
+        {
+            get => TypeBlob.Nodes;
+            set => TypeBlob.Nodes = value;
+        }
+        /// <summary>
+        /// String table bytes for this type.
+        /// </summary>
+        public byte[] StringBufferBytes
+        {
+            get => TypeBlob.StringBufferBytes;
+            set => TypeBlob.StringBufferBytes = value;
+        }
+
+        /// <summary>
+        /// <see cref="TypeBlob"/>'s string buffer, decoded to a single string.
+        /// </summary>
         public string StringBuffer
         {
-            get => StringBufferBytes != null ? Encoding.UTF8.GetString(StringBufferBytes) : null;
-            set => StringBufferBytes = Encoding.UTF8.GetBytes(value);
+            get => TypeBlob.StringBufferBytes != null ? Encoding.UTF8.GetString(TypeBlob.StringBufferBytes) : null;
+            set => TypeBlob.StringBufferBytes = Encoding.UTF8.GetBytes(value);
         }
 
         /// <summary>
@@ -91,16 +115,39 @@ namespace AssetsTools.NET
 
             if (hasTypeTree)
             {
-                int typeTreeNodeCount = reader.ReadInt32();
-                int stringBufferLen = reader.ReadInt32();
-                Nodes = new List<TypeTreeNode>(typeTreeNodeCount);
-                for (int i = 0; i < typeTreeNodeCount; i++)
+                // special "extracted typetree" handling
+                int typeTreeSize; // presumably to skip types, but we never do this (yet)
+                bool shouldReadNodes;
+                if (version >= 23)
                 {
-                    TypeTreeNode typeField = new TypeTreeNode();
-                    typeField.Read(reader, version);
-                    Nodes.Add(typeField);
+                    ExtTypeHash = new Hash128(reader);
+                    typeTreeSize = reader.ReadInt32();
+
+                    TypeBlobIsDefinition = typeTreeSize != 0;
+                    shouldReadNodes = TypeBlobIsDefinition;
                 }
-                StringBufferBytes = reader.ReadBytes(stringBufferLen);
+                else
+                {
+                    ExtTypeHash = Hash128.NewBlankHash();
+                    TypeBlobIsDefinition = true;
+                    typeTreeSize = 0;
+                    shouldReadNodes = true;
+                }
+
+                if (shouldReadNodes)
+                {
+                    TypeBlob = new TypeTreeBlob();
+                    TypeBlob.Read(reader, version);
+                }
+                else
+                {
+                    TypeBlob = new TypeTreeBlob()
+                    {
+                        Nodes = new List<TypeTreeNode>(),
+                        StringBufferBytes = new byte[0]
+                    };
+                }
+
                 if (version >= 21)
                 {
                     if (!isRefType)
@@ -147,13 +194,39 @@ namespace AssetsTools.NET
 
             if (hasTypeTree)
             {
-                writer.Write(Nodes.Count);
-                writer.Write(StringBufferBytes.Length);
-                for (int i = 0; i < Nodes.Count; i++)
+                // special "extracted typetree" handling
+                bool shouldWriteNodes;
+                long typeTreeDataStartPos = 0;
+                if (version >= 23)
                 {
-                    Nodes[i].Write(writer, version);
+                    writer.Write(ExtTypeHash.data);
+
+                    writer.Write(0); // we'll come back and fill this later
+                    typeTreeDataStartPos = writer.Position;
+
+                    shouldWriteNodes = TypeBlobIsDefinition;
                 }
-                writer.Write(StringBufferBytes);
+                else
+                {
+                    shouldWriteNodes = true;
+                }
+
+                if (shouldWriteNodes)
+                {
+                    TypeBlob.Write(writer, version);
+
+                    if (version >= 23)
+                    {
+                        // write new type tree size
+                        long curPos = writer.Position;
+                        int typeTreeDataLen = (int)(writer.Position - typeTreeDataStartPos);
+
+                        writer.Position = typeTreeDataStartPos - 4;
+                        writer.Write(typeTreeDataLen);
+                        writer.Position = curPos;
+                    }
+                }
+
                 if (version >= 21)
                 {
                     if (!IsRefType)
@@ -186,6 +259,8 @@ namespace AssetsTools.NET
 
             if (version >= 17)
                 size += 2;
+
+            // todo: calculate GetSize correctly for new type tree stuff!
 
             if ((version < 17 && TypeId < 0) ||
                 (version >= 17 && TypeId == (int)AssetClassID.MonoBehaviour) ||
@@ -236,7 +311,8 @@ namespace AssetsTools.NET
             "Prefab\0Quaternionf\0Rectf\0RectInt\0RectOffset\0second\0set\0short\0size\0SInt16\0SInt32\0SInt64\0" +
             "SInt8\0staticvector\0string\0TextAsset\0TextMesh\0Texture\0Texture2D\0Transform\0TypelessData\0UInt16\0" +
             "UInt32\0UInt64\0UInt8\0unsigned int\0unsigned long long\0unsigned short\0vector\0Vector2f\0Vector3f\0" +
-            "Vector4f\0m_ScriptingClassIdentifier\0Gradient\0Type*\0int2_storage\0int3_storage\0BoundsInt\0m_CorrespondingSourceObject\0" +
-            "m_PrefabInstance\0m_PrefabAsset\0FileSize\0Hash128\0RenderingLayerMask\0");
+            "Vector4f\0m_ScriptingClassIdentifier\0Gradient\0Type*\0int2_storage\0int3_storage\0BoundsInt\0" +
+            "m_CorrespondingSourceObject\0m_PrefabInstance\0m_PrefabAsset\0FileSize\0Hash128\0RenderingLayerMask\0" +
+            "fixed_array\0EntityId\0LoadableObjectId\0LoadableSceneId\0");
     }
 }
