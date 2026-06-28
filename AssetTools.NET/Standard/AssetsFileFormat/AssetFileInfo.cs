@@ -66,10 +66,10 @@ namespace AssetsTools.NET
         /// </summary>
         public bool IsReplacerPreviewable => Replacer != null && Replacer.HasPreview();
 
-        public void Read(AssetsFileReader reader, uint version)
+        public void Read(AssetsFileReader reader, uint version, bool bigIdEnabled = false)
         {
             reader.Align();
-            if (version >= 14)
+            if (version >= 14 || bigIdEnabled)
             {
                 PathId = reader.ReadInt64();
             }
@@ -102,10 +102,10 @@ namespace AssetsTools.NET
             Replacer = null;
         }
 
-        public void Write(AssetsFileWriter writer, uint version)
+        public void Write(AssetsFileWriter writer, uint version, bool bigIdEnabled = false)
         {
             writer.Align();
-            if (version >= 14)
+            if (version >= 14 || bigIdEnabled)
             {
                 writer.Write(PathId);
             }
@@ -375,10 +375,11 @@ namespace AssetsTools.NET
         /// Get the maximum size of this asset file info for a version.
         /// </summary>
         /// <param name="version">The version of the file.</param>
-        public static long GetSize(uint version)
+        /// <param name="bigIdEnabled">Whether legacy path IDs use 64 bits.</param>
+        public static long GetSize(uint version, bool bigIdEnabled = false)
         {
             long size = 0;
-            if (version >= 14)
+            if (version >= 14 || bigIdEnabled)
                 size += 8;
             else
                 size += 4;

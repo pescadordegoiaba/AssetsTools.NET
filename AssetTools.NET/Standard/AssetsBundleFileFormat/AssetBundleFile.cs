@@ -406,7 +406,10 @@ namespace AssetsTools.NET
                 TotalFileSize = 0,
                 CompressedSize = 0,
                 DecompressedSize = 0,
-                Flags = AssetBundleFSHeaderFlags.LZ4HCCompressed | AssetBundleFSHeaderFlags.HasDirectoryInfo |
+                Flags = (compType == AssetBundleCompressionType.LZ4Fast
+                        ? AssetBundleFSHeaderFlags.LZ4Compressed
+                        : AssetBundleFSHeaderFlags.LZ4HCCompressed) |
+                    AssetBundleFSHeaderFlags.HasDirectoryInfo |
                     (blockDirAtEnd ? AssetBundleFSHeaderFlags.BlockAndDirAtEnd : AssetBundleFSHeaderFlags.None)
             };
 
@@ -528,7 +531,7 @@ namespace AssetsTools.NET
                             {
                                 CompressedSize = (uint)compressedBlock.Length,
                                 DecompressedSize = (uint)uncompressedBlock.Length,
-                                Flags = 0x03
+                                Flags = (ushort)(compType == AssetBundleCompressionType.LZ4Fast ? 0x02 : 0x03)
                             };
 
                             totalCompressedSize += blockInfo.CompressedSize;
@@ -691,6 +694,7 @@ namespace AssetsTools.NET
                     break;
                 }
                 case AssetBundleCompressionType.LZ4:
+                case AssetBundleCompressionType.LZ4Fast:
                 {
                     LZ4BlockStream dataStream = new LZ4BlockStream(Reader.BaseStream, Header.GetFileDataOffset(), BlockAndDirInfo.BlockInfos);
                     DataReader = new AssetsFileReader(dataStream);
@@ -702,7 +706,7 @@ namespace AssetsTools.NET
         }
 
         /// <summary>
-        /// Returns the main compression type the bundle uses (the first uncompressed block type).
+        /// Returns the main compression type the bundle uses (the first compressed block type).
         /// </summary>
         /// <returns>The compression type</returns>
         public AssetBundleCompressionType GetCompressionType()
@@ -711,7 +715,11 @@ namespace AssetsTools.NET
             for (int i = 0; i < blockInfos.Length; i++)
             {
                 byte compType = blockInfos[i].GetCompressionType();
-                if (compType == 2 || compType == 3)
+                if (compType == 2)
+                {
+                    return AssetBundleCompressionType.LZ4Fast;
+                }
+                else if (compType == 3)
                 {
                     return AssetBundleCompressionType.LZ4;
                 }

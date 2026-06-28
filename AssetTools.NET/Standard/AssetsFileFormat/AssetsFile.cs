@@ -113,6 +113,7 @@ namespace AssetsTools.NET
                 TargetPlatform = Metadata.TargetPlatform,
                 TypeTreeEnabled = Metadata.TypeTreeEnabled,
                 TypeTreeTypes = Metadata.TypeTreeTypes,
+                BigIdEnabled = Metadata.BigIdEnabled,
                 AssetInfos = newAssetInfos,
                 ScriptTypes = Metadata.ScriptTypes,
                 Externals = Metadata.Externals,
@@ -124,21 +125,15 @@ namespace AssetsTools.NET
             newMetadata.Write(writer, Header.Version);
             int newMetadataSize = (int)(writer.Position - newMetadataStart);
 
-            if (writer.Position < 0x1000)
+            long originalDataPosition = writeStart + Header.DataOffset;
+            if (writer.Position <= originalDataPosition)
             {
-                // for padding only: if we're already past address 0x1000, this is skipped
-                while (writer.Position < 0x1000)
-                {
-                    writer.Write((byte)0x00);
-                }
+                // Keep the original metadata capacity and data offset when the new metadata fits.
+                writer.Position = originalDataPosition;
             }
             else
             {
-                // otherwise align to 16 bytes, even if already aligned
-                if (writer.Position % 16 == 0)
-                    writer.Position += 16;
-                else
-                    writer.Align16();
+                writer.Align16();
             }
 
             long newFirstFileOffset = writer.Position;
@@ -176,7 +171,7 @@ namespace AssetsTools.NET
                 MetadataSize = newMetadataSize,
                 FileSize = newFileSize,
                 Version = Header.Version,
-                DataOffset = newFirstFileOffset,
+                DataOffset = newFirstFileOffset - writeStart,
                 Endianness = Header.Endianness
             };
 

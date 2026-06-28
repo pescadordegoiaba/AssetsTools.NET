@@ -14,6 +14,11 @@ namespace AssetsTools.NET.Extra
         /// </summary>
         public AssetBundleCompressionType originalCompression;
         /// <summary>
+        /// Whether the original bundle stored its block and directory info at
+        /// the end of the file.
+        /// </summary>
+        public bool originalBlockAndDirAtEnd;
+        /// <summary>
         /// List of loaded assets files for this bundle.
         /// </summary>
         /// <remarks>
@@ -34,6 +39,8 @@ namespace AssetsTools.NET.Extra
             file.Read(new AssetsFileReader(stream));
 
             originalCompression = file.GetCompressionType();
+            originalBlockAndDirAtEnd =
+                (file.Header.FileStreamHeader.Flags & AssetBundleFSHeaderFlags.BlockAndDirAtEnd) != 0;
             if (file.Header != null && file.DataIsCompressed && unpackIfPacked)
             {
                 file = BundleHelper.UnpackBundle(file);

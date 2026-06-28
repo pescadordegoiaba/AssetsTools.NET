@@ -22,6 +22,10 @@ namespace AssetsTools.NET
         /// </summary>
         public List<TypeTreeType> TypeTreeTypes { get; set; }
         /// <summary>
+        /// Whether path IDs are 64-bit in serialized file versions 7 through 13.
+        /// </summary>
+        public int BigIdEnabled { get; set; }
+        /// <summary>
         /// List of asset infos. Do not add or remove from this list directly, instead use the
         /// <see cref="AddAssetInfo(AssetFileInfo)"/> or <see cref="RemoveAssetInfo(AssetFileInfo)"/> methods.
         /// </summary>
@@ -71,6 +75,10 @@ namespace AssetsTools.NET
             {
                 TypeTreeEnabled = reader.ReadBoolean();
             }
+            else
+            {
+                TypeTreeEnabled = true;
+            }
 
             int fieldCount = reader.ReadInt32();
             TypeTreeTypes = new List<TypeTreeType>(fieldCount);
@@ -81,13 +89,18 @@ namespace AssetsTools.NET
                 TypeTreeTypes.Add(typeTreeType);
             }
 
+            if (version >= 7 && version < 14)
+            {
+                BigIdEnabled = reader.ReadInt32();
+            }
+
             int assetCount = reader.ReadInt32();
             reader.Align();
             AssetInfos = new List<AssetFileInfo>(assetCount);
             for (int i = 0; i < assetCount; i++)
             {
                 AssetFileInfo fileInfo = new AssetFileInfo();
-                fileInfo.Read(reader, version);
+                fileInfo.Read(reader, version, BigIdEnabled != 0);
 
                 // todo, check correct version
                 fileInfo.TypeId = fileInfo.GetTypeId(this, version);
@@ -95,16 +108,26 @@ namespace AssetsTools.NET
                 AssetInfos.Add(fileInfo);
             }
 
-            int scriptTypeCount = reader.ReadInt32();
-            ScriptTypes = new List<AssetPPtr>(scriptTypeCount);
-            for (int i = 0; i < scriptTypeCount; i++)
+            ScriptTypes = new List<AssetPPtr>();
+            if (version >= 11)
             {
-                int fileId = reader.ReadInt32();
-                reader.Align(); // only align after fileId
-                long pathId = reader.ReadInt64();
-                // no alignment needed here since pathId is a multiple of 4
-                AssetPPtr pptr = new AssetPPtr(fileId, pathId);
-                ScriptTypes.Add(pptr);
+                int scriptTypeCount = reader.ReadInt32();
+                ScriptTypes.Capacity = scriptTypeCount;
+                for (int i = 0; i < scriptTypeCount; i++)
+                {
+                    int fileId = reader.ReadInt32();
+                    long pathId;
+                    if (version < 14)
+                    {
+                        pathId = reader.ReadInt32();
+                    }
+                    else
+                    {
+                        reader.Align();
+                        pathId = reader.ReadInt64();
+                    }
+                    ScriptTypes.Add(new AssetPPtr(fileId, pathId));
+                }
             }
 
             int externalCount = reader.ReadInt32();
@@ -154,19 +177,34 @@ namespace AssetsTools.NET
                 TypeTreeTypes[i].Write(writer, version, TypeTreeEnabled);
             }
 
+            if (version >= 7 && version < 14)
+            {
+                writer.Write(BigIdEnabled);
+            }
+
             writer.Write(AssetInfos.Count);
             writer.Align();
             for (int i = 0; i < AssetInfos.Count; i++)
             {
-                AssetInfos[i].Write(writer, version);
+                AssetInfos[i].Write(writer, version, BigIdEnabled != 0);
             }
 
-            writer.Write(ScriptTypes.Count);
-            for (int i = 0; i < ScriptTypes.Count; i++)
+            if (version >= 11)
             {
-                writer.Write(ScriptTypes[i].FileId);
-                writer.Align(); // only align after fileId
-                writer.Write(ScriptTypes[i].PathId);
+                writer.Write(ScriptTypes.Count);
+                for (int i = 0; i < ScriptTypes.Count; i++)
+                {
+                    writer.Write(ScriptTypes[i].FileId);
+                    if (version < 14)
+                    {
+                        writer.Write((int)ScriptTypes[i].PathId);
+                    }
+                    else
+                    {
+                        writer.Align();
+                        writer.Write(ScriptTypes[i].PathId);
+                    }
+                }
             }
 
             writer.Write(Externals.Count);
@@ -492,14 +530,26 @@ namespace AssetsTools.NET
             for (int i = 0; i < TypeTreeTypes.Count; i++)
                 size += TypeTreeTypes[i].GetSize(version, TypeTreeEnabled);
 
-            size += 4;
-            size = (size + 3) & ~3;
-            size += AssetFileInfo.GetSize(version) * AssetInfos.Count;
+            if (version >= 7 && version < 14)
+                size += 4;
 
-            // if we get unity 4- support, this needs to be changed
             size += 4;
             size = (size + 3) & ~3;
-            size += 12 * ScriptTypes.Count;
+            size += AssetFileInfo.GetSize(version, BigIdEnabled != 0) * AssetInfos.Count;
+
+            if (version >= 11)
+            {
+                size += 4;
+                if (version < 14)
+                {
+                    size += 8 * ScriptTypes.Count;
+                }
+                else
+                {
+                    size = (size + 3) & ~3;
+                    size += 12 * ScriptTypes.Count;
+                }
+            }
 
             size += 4;
             for (int i = 0; i < Externals.Count; i++)
